@@ -14,7 +14,7 @@ case class Rating(userId: Int, productId: Int, score: Double, timestamp: Long)
 case class MongoConfig(uri: String, db: String)
 
 //TODO 推介给用户的商品的id，r为推介给用户的商品用户对该商品的评分
-case class Recommendation(rid: Int, r: Double)
+//case class Recommendation(rid: Int, r: Double)
 
 
 object StatisticsRecommender {
@@ -24,16 +24,16 @@ object StatisticsRecommender {
 
 	//需要统计的指标的表名
 	//热门历史商品
-	val RATE_MORE_PRODUCTS = "RateMoreProduct"
+	val RATE_MORE_PRODUCTS = "RateMoreProducts"
 	//最近热门历史商品
-	val RATE_MORE_RECENTLY_PRODUCT = "RateMoreRecentlyProduct"
+	val RATE_MORE_RECENTLY_PRODUCTS = "RateMoreRecentlyProducts"
 	//商品平均得分
-	val AVERAGE_PRODUCT = "averageProduct"
+	val AVERAGE_PRODUCTS = "averageProducts"
 
 	def main(args: Array[String]): Unit = {
 
 		val config = Map(
-			"mongo.uri" -> "mongodb://localhost:27017/recommender",
+			"mongo.uri" -> "mongodb://sql:27017/recommender",
 			"mongo.db" -> "recommender"
 		)
 
@@ -57,11 +57,14 @@ object StatisticsRecommender {
 		  .format("com.mongodb.spark.sql").load()
 		  .as[Product].toDF()
 
-		//热门商品
+		//历史热门商品
 		//创建临时表
 		ratingDF.createOrReplaceTempView("ratings")
 
-		val rateMoreProductsDF: DataFrame = spark.sql("select productId, count(productId) as count from ratings group by productId")
+		val rateMoreProductsDF: DataFrame = spark.sql("select productId, count(productId) as count from" +
+		  " ratings group by productId")
+
+		rateMoreProductsDF.show()
 
 		rateMoreProductsDF.write.option("uri", mongoConfig.uri).option("collection", RATE_MORE_PRODUCTS)
 		  .mode("overwrite").format("com.mongodb.spark.sql").save()
@@ -70,8 +73,40 @@ object StatisticsRecommender {
 		//格式化时间
 		val dateFormat = new SimpleDateFormat("yyyyMM")
 
+		//定义UDF函数将时间戳转换成年月
 		spark.udf
 		  .register("changeDate", (date: Long) => dateFormat.format(new Date(date * 1000L)).toInt)
+
+		val ratingOfYearMonth: DataFrame = spark.sql("select productId, score, changeDate(timestamp) as yearmonth" +
+		  " from ratings")
+
+		ratingOfYearMonth.createOrReplaceTempView("ratingOfMonth")
+
+		val rateMoreRecentlyProductsDF: DataFrame = spark.sql("select productId, count(productId) as count, " +
+		  "yearmonth from ratingOfMonth group by yearmonth, productId")
+
+		rateMoreRecentlyProductsDF.show()
+
+		rateMoreRecentlyProductsDF
+		  .write
+		  .option("uri", mongoConfig.uri)
+		  .option("collection", RATE_MORE_RECENTLY_PRODUCTS)
+		  .mode("overwrite")
+		  .format("com.mongodb.spark.sql")
+		  .save()
+
+
+		//商品平均得分
+		val averageProductsDF: DataFrame = spark.sql("select productId, avg(score) as avg from ratings" +
+		  " group by productId order by avg desc")
+
+		averageProductsDF.show()
+
+		averageProductsDF.write.option("uri", mongoConfig.uri).option("collection", AVERAGE_PRODUCTS)
+		  .mode("overwrite").format("com.mongodb.spark.sql").save()
+
+		spark.stop()
+
 
 	}
 
