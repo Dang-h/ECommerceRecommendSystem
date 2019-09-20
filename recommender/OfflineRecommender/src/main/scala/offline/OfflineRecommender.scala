@@ -49,7 +49,8 @@ object OfflineRecommender {
 		import sparkSession.implicits._
 
 		//读取业务数据，转换成RDD
-		val ratingRDD: RDD[ProductRating] = sparkSession.read.option("uri", mongoConfig.uri).option("collection", MONGODB_RATING_COLLECTION)
+		val ratingRDD: RDD[ProductRating] = sparkSession.read.option("uri", mongoConfig.uri)
+		  .option("collection", MONGODB_RATING_COLLECTION)
 		  .format("com.mongodb.spark.sql")
 		  .load()
 		  .as[ProductRating]
@@ -62,10 +63,11 @@ object OfflineRecommender {
 		val userRDD: RDD[Int] = ratingsRDD.map(_._1).distinct()
 
 		//读取商品数据集
-		val productRDD: RDD[ProductRating] = sparkSession.read.option("uri", mongoConfig.uri).option("collection", MONGODB_RATING_COLLECTION)
+		val productRDD: RDD[Product] = sparkSession.read.option("uri", mongoConfig.uri)
+		  .option("collection", MONGODB_PRODUCT_COLLECTION)
 		  .format("com.mongodb.spark.sql")
 		  .load()
-		  .as[ProductRating]
+		  .as[Product]
 		  .rdd
 
 		//抽取产品ID，缓存
@@ -85,24 +87,28 @@ object OfflineRecommender {
 		val preRatings: RDD[Rating] = model.predict(userProducts)
 
 		val userRecs: DataFrame = preRatings.filter(_.rating > 0)
-		  .map(r => (
+		  .map((r: Rating) => (
 			r.user,
 			(r.product, r.rating)
 		  ))
 		  .groupByKey()
 		  .map {
-			  case (userId, recs) =>
-				  UserRecs(userId,
-					  recs.toList.sortWith(_._2 > _._2)
-						.take(USER_MAX_RECOMMENDATION)
-						.map(x => Recommendation(x._1, x._2)))
+			  case (userId, recs) => UserRecs(
+				  userId,
+				  recs.toList.sortWith(_._2 > _._2)
+					.take(USER_MAX_RECOMMENDATION)
+					.map(x => Recommendation(x._1, x._2))
+			  )
 		  }.toDF()
 
-		userRecs.write.option("uri", mongoConfig.uri).option("collection", USER_RECS)
-		  .mode("overwrite").format("com.mongodb.spark.sql").save()
+		userRecs.write.option("uri", mongoConfig.uri)
+		  .option("collection", USER_RECS)
+		  .mode("overwrite")
+		  .format("com.mongodb.spark.sql").save()
 
 		//商品隐特征矩阵
-		val productFeatures: RDD[(Int, DoubleMatrix)] = model.productFeatures.map { case (productId, features) => (productId, new DoubleMatrix(features)) }
+		val productFeatures: RDD[(Int, DoubleMatrix)] = model.productFeatures
+		  .map { case (productId, features) => (productId, new DoubleMatrix(features)) }
 
 		//自己和自己做笛卡尔积：自连接
 		val productRecs: DataFrame = productFeatures.cartesian(productFeatures)

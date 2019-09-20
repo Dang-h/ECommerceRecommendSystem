@@ -68,7 +68,7 @@ object DataLoader {
 			Ratins(splitArr(0).toInt, splitArr(1).toInt, splitArr(2).toDouble, splitArr(3).toLong)
 		}).toDF()
 
-		//		ratingDF.show()
+//				ratingDF.show()
 
 		//声明一个隐式配置对象
 		val mongoConfig = MongoConfig(config("mongo.uri"), config("mongo.db"))
